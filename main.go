@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"encoding/json"
+	"flag"
 	"fmt"
 	"log"
 	"os"
@@ -12,6 +13,33 @@ import (
 )
 
 const defaultWidth = 240
+
+type (
+	config struct {
+		Width   int
+		Filters map[string]string
+	}
+)
+
+func (c *config) FromArgs() *config {
+	flag.IntVar(&c.Width, "w", defaultWidth, "-w {width}")
+	flag.Func("f", "-f key=value", func(x string) error {
+		if c.Filters == nil {
+			c.Filters = make(map[string]string)
+		}
+		parts := strings.Split(strings.TrimSpace(x), "=")
+		c.Filters[strings.TrimSpace(parts[0])] = strings.TrimSpace(parts[1])
+		return nil
+	})
+
+	flag.Parse()
+	return c
+}
+
+func (c *config) String() string {
+	bts, _ := json.MarshalIndent(c, "", "\t")
+	return string(bts)
+}
 
 func getWidth() int64 {
 	cmd := exec.Command("stty", "size")
@@ -40,9 +68,9 @@ func padRight(str string, fill string, length int) string {
 }
 
 func main() {
-	width := getWidth()
+	cfg := new(config).FromArgs()
+	fmt.Println(cfg.String())
 
-	fmt.Println("width: ", width)
 	buf := bufio.NewScanner(os.Stdin)
 	msgKey := padRight("message", " ", 40)
 
@@ -56,7 +84,23 @@ func main() {
 		if err = json.Unmarshal(line, &m); err != nil {
 			fmt.Println(string(line))
 		} else {
-			var msg any
+			var (
+				msg  any
+				skip bool
+			)
+
+			for k, v := range m {
+				target, ok := cfg.Filters[k]
+				if ok && target != v {
+					skip = true
+					break
+				}
+			}
+
+			if skip {
+				continue
+			}
+
 			for k, v := range m {
 				if k == "message" {
 					msg = v
@@ -70,7 +114,6 @@ func main() {
 			}
 
 		}
-		fmt.Println(strings.Repeat("_", int(width)))
-
+		fmt.Println(strings.Repeat("_", cfg.Width))
 	}
 }
