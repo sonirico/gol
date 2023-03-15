@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"log"
@@ -15,20 +16,82 @@ import (
 const defaultWidth = 240
 
 type (
+	Opcode string
+
+	Filter struct {
+		Key   string
+		Value string
+		Op    Opcode
+	}
+
 	config struct {
 		Width   int
-		Filters map[string]string
+		Filters map[string]Filter
 	}
 )
+
+const (
+	OpEqual    = "="
+	OpNotEqual = "!="
+)
+
+func (op Opcode) String() string {
+	return string(op)
+}
+
+func (f Filter) Match(other any) bool {
+	switch f.Op {
+	case OpEqual:
+		return other == f.Value
+	case OpNotEqual:
+		return other != f.Value
+	}
+
+	return false
+}
+
+func ParseOpCode(x string) (Opcode, error) {
+	switch {
+	case strings.Contains(x, "!="):
+		return OpNotEqual, nil
+	case strings.Contains(x, "<>"):
+		return OpNotEqual, nil
+	case strings.Contains(x, "="):
+		return OpEqual, nil
+	}
+	return "", errors.New("invalid operator")
+}
+
+func ParseFilter(x string) (f Filter, err error) {
+	x = strings.TrimSpace(x)
+	op, err := ParseOpCode(x)
+	if err != nil {
+		return f, err
+	}
+	parts := strings.Split(strings.TrimSpace(x), op.String())
+	key := strings.TrimSpace(parts[0])
+	value := strings.TrimSpace(parts[1])
+	return Filter{
+		Key:   key,
+		Value: value,
+		Op:    op,
+	}, nil
+}
 
 func (c *config) FromArgs() *config {
 	flag.IntVar(&c.Width, "w", defaultWidth, "-w {width}")
 	flag.Func("f", "-f key=value", func(x string) error {
 		if c.Filters == nil {
-			c.Filters = make(map[string]string)
+			c.Filters = make(map[string]Filter)
 		}
-		parts := strings.Split(strings.TrimSpace(x), "=")
-		c.Filters[strings.TrimSpace(parts[0])] = strings.TrimSpace(parts[1])
+
+		filter, err := ParseFilter(x)
+		if err != nil {
+			return err
+		}
+
+		c.Filters[filter.Key] = filter
+
 		return nil
 	})
 
@@ -90,8 +153,8 @@ func main() {
 			)
 
 			for k, v := range m {
-				target, ok := cfg.Filters[k]
-				if ok && target != v {
+				filter, ok := cfg.Filters[k]
+				if ok && !filter.Match(v) {
 					skip = true
 					break
 				}
